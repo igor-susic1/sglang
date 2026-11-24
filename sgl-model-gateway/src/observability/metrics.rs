@@ -191,7 +191,7 @@ pub(crate) fn init_metrics() {
     );
     describe_counter!(
         "smg_router_upstream_responses_total",
-        "Upstream backend HTTP responses by router_type, status_code, error_code"
+        "Upstream backend HTTP responses by router_type, model, status_code, error_code"
     );
 
     // Layer 2: Router inference metrics (gRPC only)
@@ -618,17 +618,20 @@ impl Metrics {
     }
 
     /// Record upstream backend response.
-    /// Uses static strings for common status codes and interning for error_code.
+    /// Uses static strings for common status codes and interning for model and error_code.
     pub fn record_router_upstream_response(
         router_type: &'static str,
+        model_id: &str,
         status_code: u16,
         error_code: &str,
     ) {
         let status_str: Cow<'static, str> = status_code_to_cow(status_code);
+        let model = intern_string(model_id);
         let error_interned = intern_string(error_code);
         counter!(
             "smg_router_upstream_responses_total",
             "router_type" => router_type,
+            "model" => model,
             "status_code" => status_str,
             "error_code" => error_interned
         )
@@ -1512,5 +1515,38 @@ mod tests {
         assert_eq!(method_to_static_str("GET"), "GET");
         assert_eq!(method_to_static_str("POST"), "POST");
         assert_eq!(method_to_static_str("UNKNOWN"), "OTHER");
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_upstream_response_includes_model_label() {
+        let recorder = PrometheusBuilder::new().build_recorder();
+        let handle = recorder.handle();
+        metrics::set_global_recorder(recorder).expect("set test recorder");
+
+        Metrics::record_router_upstream_response(
+            metrics_labels::ROUTER_HTTP,
+            "moonshotai/Kimi-K3.1-Pro",
+            500,
+            "call_upstream_request_error",
+        );
+
+        let rendered = handle.render();
+        let emitted = rendered
+            .lines()
+            .find(|line| line.starts_with("smg_router_upstream_responses_total{"))
+            .expect("upstream response counter");
+
+        assert!(emitted.contains("router_type=\"http\""), "{emitted}");
+        assert!(
+            emitted.contains("model=\"moonshotai/Kimi-K3.1-Pro\""),
+            "{emitted}"
+        );
+        assert!(emitted.contains("status_code=\"500\""), "{emitted}");
+        assert!(
+            emitted.contains("error_code=\"call_upstream_request_error\""),
+            "{emitted}"
+        );
+        assert!(emitted.ends_with(" 1"), "{emitted}");
     }
 }

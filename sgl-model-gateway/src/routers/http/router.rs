@@ -224,6 +224,7 @@ impl Router {
                 // Need to be outside `route_typed_request_once` because that function has multiple return paths
                 Metrics::record_router_upstream_response(
                     metrics_labels::ROUTER_HTTP,
+                    model,
                     res.status().as_u16(),
                     extract_error_code_from_response(&res),
                 );
